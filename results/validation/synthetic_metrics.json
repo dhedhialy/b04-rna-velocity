@@ -1,0 +1,11 @@
+{
+  "n_genes": 200,
+  "n_certified": 15,
+  "n_unresolved": 185,
+  "coverage": 0.0,
+  "power": 0.075,
+  "type_i_error": 0.0,
+  "abstention_rate": 0.0,
+  "n_false_positive": 0,
+  "n_false_negative": 0
+}

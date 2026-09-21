@@ -1,0 +1,35 @@
+{
+  "project": "B04 \u2014 Falsifiable Regimes for RNA Velocity",
+  "status": "scout_complete",
+  "timestamp": "2026-09-21T00:37:15.585399",
+  "summary": {
+    "n_genes_analyzed": 50,
+    "n_certified_positive": 2,
+    "n_certified_negative": 2,
+    "n_unresolved": 46
+  },
+  "identification": {
+    "coverage": 0.0,
+    "power": 0.075,
+    "type_i_error": 0.0
+  },
+  "counterexample": {
+    "n_pairs": 50,
+    "n_abstained": 50,
+    "abstention_rate": 1.0
+  },
+  "labeling_power": {
+    "n_genes": 200,
+    "n_separated": 129,
+    "power": 0.645
+  },
+  "kill_criteria": {
+    "theorem_equivalent_to_existing": false,
+    "residual_is_stability_metric": false,
+    "labeling_does_not_shrink": false,
+    "low_power": false,
+    "preprocessing_determines_conclusion": false,
+    "all_calls_unresolved": false,
+    "only_benchmark_ranking": false
+  }
+}
