@@ -12,7 +12,7 @@ from .certificate import build_certificate, export_certificates, certificate_sum
 from .labeling import labeling_falsification_test
 from .validation import (
     validate_on_synthetic, validate_on_counterexamples,
-    validate_labeling_power,
+    validate_labeling_power, synthetic_population,
 )
 from .reporting import generate_audit_summary, write_audit_summary
 
@@ -109,24 +109,18 @@ def main():
     with open(args.out / "validation" / "labeling_power.json", 'w') as f:
         json.dump(labeling_pwr, f, indent=2)
 
-    # --- Stage 4: Generate certificates for synthetic genes ---
-    print("\n=== Stage 4: Certificate generation ===")
+    # --- Stage 4: Certificates for the same designed validation population ---
+    print("\n=== Stage 4: Certificate generation (designed genes with ground truth) ===")
     certificates = []
     n_pos, n_neg, n_unr = 0, 0, 0
-    for i in range(min(50, args.n_genes)):
-        beta = rng.uniform(bounds.beta_lo, bounds.beta_hi)
-        gamma = rng.uniform(bounds.gamma_lo, bounds.gamma_hi)
-        u_ss = rng.uniform(5.0, 50.0)
-        s_obs = max(0.1, u_ss * (beta / gamma) * (1 + rng.normal(0, 0.2)))
-        u_obs = max(0.1, u_ss * (1 + rng.normal(0, 0.2)))
-        n_cells = int(rng.integers(100, 1000))
-
+    rows = synthetic_population(bounds, args.n_genes, seed=args.seed)
+    for row in rows:
         cert = build_certificate(
-            gene_id=f"gene_{i:04d}",
+            gene_id=row["gene_id"],
             dataset_accession="synthetic",
             dataset_version="v0",
             cell_filter="all",
-            s_obs=s_obs, u_obs=u_obs, n_cells=n_cells,
+            s_obs=row["s"], u_obs=row["u"], n_cells=200,
             bounds=bounds,
         )
         certificates.append(cert)

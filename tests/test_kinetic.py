@@ -192,18 +192,60 @@ class TestLabeling:
 
 
 class TestValidation:
-    def test_synthetic_validation_runs(self):
-        bounds = KineticBounds(beta_lo=0.1, beta_hi=5.0, gamma_lo=0.1, gamma_hi=5.0)
-        metrics = validate_on_synthetic(bounds, 50, seed=42)
-        assert metrics.n_genes == 50
-        assert 0 <= metrics.coverage <= 1
-        assert 0 <= metrics.power <= 1
+    def test_synthetic_validation_invariants(self):
+        """The three meaningful invariants of the certificate (AUDIT Sec 12):
 
-    def test_counterexample_abstention(self):
+        - Coverage == 1:  for fixed (s,u), v = βu − γs is LINEAR in (β,γ), so
+          the [v_min, v_max] envelope over the parameter rectangle always
+          contains the true velocity. If this ever fails, the envelope math
+          is wrong.
+        - Type-I == 0: a certified sign can never contradict ground truth,
+          because certification requires ALL compatible models (including the
+          true one) to agree on the sign.
+        - Recall == 1 on IND/REP regimes and abstention == 1 on AMBIENT ones.
+        """
         bounds = KineticBounds(beta_lo=0.1, beta_hi=5.0, gamma_lo=0.1, gamma_hi=5.0)
-        result = validate_on_counterexamples(bounds, 20, seed=42)
+        m = validate_on_synthetic(bounds, 150, seed=42)
+        assert m.n_genes == 150
+        assert m.n_certified > 0, "designed IND/REP regimes must be certifiable"
+        assert m.n_unresolved > 0, "designed AMBIENT regimes must abstain"
+        assert m.coverage == 1.0, f"linear-envelope identity broken (cov={m.coverage})"
+        assert m.type_i_error == 0.0, f"certified sign contradicted truth (={m.type_i_error})"
+        assert m.power == 1.0, f"IND/REP recall should be perfect (={m.power})"
+        assert m.abstention_rate == 1.0, f"AMBIENT abstention should be perfect"
+
+    def test_counterexample_abstention_is_forced(self):
+        """Counterexamples must force abstention: prove opposite-sign models
+        fit the snapshot, so the certificate MUST return UNRESOLVED."""
+        bounds = KineticBounds(beta_lo=0.1, beta_hi=5.0, gamma_lo=0.1, gamma_hi=5.0)
+        result = validate_on_counterexamples(bounds, 100, seed=42)
         assert result["n_pairs"] > 0
-        assert 0 <= result["abstention_rate"] <= 1
+        assert result["abstention_rate"] == 1.0, "a counterexample must abstain"
+
+    def test_generic_coverage_and_type1(self):
+        """Property test, NOT regime-designed: for ANY (β,γ) inside the bounds
+        and any observed (s,u), the envelope must contain the true velocity
+        (coverage 1.0) and the certificate can never certify a sign that
+        contradicts ground truth (type-I 0.0). Guaranteed by Theorem 1;
+        regression-locks the coverage-indentation bug we fixed."""
+        bounds = KineticBounds(beta_lo=0.1, beta_hi=5.0, gamma_lo=0.1, gamma_hi=5.0)
+        rng = np.random.default_rng(0)
+        n_cov = n_t1 = n = 0
+        for _ in range(1000):
+            beta = float(rng.uniform(bounds.beta_lo, bounds.beta_hi))
+            gamma = float(rng.uniform(bounds.gamma_lo, bounds.gamma_hi))
+            u = float(rng.uniform(1.0, 100.0))
+            s = float(rng.uniform(1.0, 100.0))
+            true_v = beta * u - gamma * s
+            r = identify_direction(s, u, bounds)
+            n += 1
+            if r.v_range[0] <= true_v <= r.v_range[1]:
+                n_cov += 1
+            if r.certified and not (true_v > 0 if r.direction == "POSITIVE"
+                                    else true_v < 0):
+                n_t1 += 1
+        assert n_cov == n, f"envelope missed the true velocity ({n_cov}/{n})"
+        assert n_t1 == 0, f"certified a sign contradicting ground truth ({n_t1})"
 
     def test_labeling_power(self):
         bounds = KineticBounds(beta_lo=0.1, beta_hi=5.0, gamma_lo=0.1, gamma_hi=5.0)

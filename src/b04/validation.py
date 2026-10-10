@@ -44,72 +44,113 @@ class ValidationMetrics:
     abstention_rate: float = 0.0
 
 
+def synthetic_population(
+    bounds: KineticBounds,
+    n_genes: int = 200,
+    seed: int = 0,
+) -> List[Dict[str, float]]:
+    """Build a designed synthetic population with unambiguous ground truth.
+
+    Regime split (roughly thirds):
+      * INDUCED:   u/s ratio 2-4x above γ_hi/β_lo  -> true_v > 0 for every
+                   (β, γ) in bounds -> certificate MUST certify POSITIVE.
+      * REPRESSED: u/s ratio 2-4x below γ_lo/β_hi  -> true_v < 0 for every
+                   (β, γ) in bounds -> certificate MUST certify NEGATIVE.
+      * AMBIENT:   u/s ratio inside [γ_lo/β_hi, γ_hi/β_lo] -> compatible
+                   models have mixed signs -> certificate MUST abstain.
+
+    Each row carries its own ground truth (true_v, regime) plus the
+    certificate verdict, so validators and certificate issuance read the
+    SAME genes (single source of truth -- no stale random demo clouds).
+    """
+    rng = np.random.default_rng(seed)
+    r_lo = bounds.gamma_lo / bounds.beta_hi
+    r_hi = bounds.gamma_hi / bounds.beta_lo
+    n_ind = n_genes // 3
+    n_rep = n_genes // 3
+    n_amb = n_genes - n_ind - n_rep
+    ratio_ind = r_hi * np.exp(rng.uniform(np.log(2.0), np.log(4.0), n_ind))
+    ratio_rep = r_lo / np.exp(rng.uniform(np.log(2.0), np.log(4.0), n_rep))
+    ratio_amb = r_lo + (r_hi - r_lo) * rng.uniform(0.1, 0.9, n_amb)
+    ratios = np.concatenate([ratio_ind, ratio_rep, ratio_amb])
+    regime = (["induced"] * n_ind + ["repressed"] * n_rep
+              + ["ambient"] * n_amb)
+    rng_obs = np.random.default_rng(seed + 1_000_000)  # independent, but pinned
+
+    rows = []
+    for i in range(len(regime)):
+        beta = float(rng_obs.uniform(bounds.beta_lo, bounds.beta_hi))
+        gamma = float(rng_obs.uniform(bounds.gamma_lo, bounds.gamma_hi))
+        s_obs = float(rng_obs.uniform(5.0, 50.0))
+        u_obs = max(0.1, s_obs * ratios[i])
+        true_v = beta * u_obs - gamma * s_obs
+        id_result = identify_direction(s_obs, u_obs, bounds)
+        rows.append({
+            "gene_id": f"G{i:04d}", "regime": regime[i], "s": s_obs, "u": u_obs,
+            "true_v": true_v, "beta": beta, "gamma": gamma,
+            "direction": id_result.direction, "certified": id_result.certified,
+            "v_min": id_result.v_range[0], "v_max": id_result.v_range[1],
+            "width": id_result.v_range[1] - id_result.v_range[0],
+        })
+    return rows
+
+
 def validate_on_synthetic(
     bounds: KineticBounds,
     n_genes: int = 200,
     seed: int = 0,
 ) -> ValidationMetrics:
-    """Validate direction certificates on synthetic data with known ground truth.
+    """Validate direction certificates on a designed synthetic population.
 
-    Generates genes with known velocity directions (from the kinetic model),
-    then checks whether the certificate correctly identifies or abstains.
+    The population is DESIGNED to make the certificate's invariants testable
+    (not a random near-steady-state cloud, where everything is silently
+    UNRESOLVED and -- as the bug we fixed showed -- the metrics read 0.0).
+    See `synthetic_population` for the regime design.
+
+    The meaningful invariants checked:
+
+      * Coverage      == 1.0   (the [v_min, v_max] envelope over a rectangle
+                                always contains the true velocity; a linear
+                                consequence of v = βu − γs).
+      * Type-I error  == 0.0   (a certified sign can never contradict the
+                                truth: certification requires ALL compatible
+                                models -- including the true one -- to agree).
+      * Recall (IND/REP) == 1.0 and Abstention (AMBIENT) == 1.0.
     """
-    rng = np.random.default_rng(seed)
     metrics = ValidationMetrics()
 
-    for i in range(n_genes):
-        # Random kinetic parameters
-        beta = rng.uniform(bounds.beta_lo, bounds.beta_hi)
-        gamma = rng.uniform(bounds.gamma_lo, bounds.gamma_hi)
+    for row in synthetic_population(bounds, n_genes, seed):
+        true_v = row["true_v"]
+        id_cert = row["certified"]
+        direction = row["direction"]
+        regime = row["regime"]
 
-        # Random observation near steady state
-        u_ss = rng.uniform(1.0, 50.0)
-        s_ss = u_ss * (beta / gamma)  # steady state: s = u * β/γ
-
-        # Add noise
-        s_obs = max(0.1, s_ss + rng.normal(0, 0.5))
-        u_obs = max(0.1, u_ss + rng.normal(0, 0.5))
-
-        # True velocity
-        true_v = beta * u_ss - gamma * s_ss  # = 0 at exact steady state
-        # Off-steady-state: perturb
-        s_obs = max(0.1, s_ss * (1 + rng.normal(0, 0.3)))
-        u_obs = max(0.1, u_ss * (1 + rng.normal(0, 0.3)))
-        true_v = beta * u_obs - gamma * s_obs
-
-        # Apply certificate
-        id_result = identify_direction(s_obs, u_obs, bounds)
-
-        # Count
         metrics.n_genes += 1
-        if id_result.certified:
+        if id_cert:
             metrics.n_certified += 1
         else:
             metrics.n_unresolved += 1
 
-        # Check correctness
-        if true_v > 0:
+        if regime in ("induced", "repressed"):
+            assert (regime == "induced") == (true_v > 0), "regime design broken"
             metrics.n_truly_nonzero += 1
-            if id_result.direction == "POSITIVE":
+            correct = (regime == "induced" and direction == "POSITIVE") or \
+                      (regime == "repressed" and direction == "NEGATIVE")
+            if correct:
                 metrics.n_correctly_certified += 1
-            elif id_result.direction == "NEGATIVE":
+            if direction == "NEGATIVE" and regime == "induced":
                 metrics.n_false_negative += 1
-        elif true_v < 0:
-            metrics.n_truly_nonzero += 1
-            if id_result.direction == "NEGATIVE":
-                metrics.n_correctly_certified += 1
-            elif id_result.direction == "POSITIVE":
+            if direction == "POSITIVE" and regime == "repressed":
                 metrics.n_false_positive += 1
         else:
             metrics.n_truly_zero += 1
-            if id_result.direction == "UNRESOLVED":
+            if direction == "UNRESOLVED":
                 metrics.n_correctly_abstained += 1
 
-            # Coverage
-            if id_result.v_range[0] <= true_v <= id_result.v_range[1]:
-                metrics.n_covered += 1
+        # Coverage MUST hold by the linear-envelope identity (true params in-bounds)
+        if row["v_min"] <= true_v <= row["v_max"]:
+            metrics.n_covered += 1
 
-    # Compute rates
     if metrics.n_genes > 0:
         metrics.coverage = metrics.n_covered / metrics.n_genes
     if metrics.n_truly_nonzero > 0:
@@ -130,28 +171,30 @@ def validate_on_counterexamples(
 ) -> Dict[str, float]:
     """Validate that adversarial pairs are correctly identified as UNRESOLVED.
 
-    The direction certificate should ABSTAIN for observationally equivalent
-    models with opposite velocity signs.
+    For each observationally equivalent pair (same (s, u), models with
+    v_A > 0 and v_B < 0), the certificate is REQUIRED to abstain: if the
+    compatible set contains opposite signs, the direction cannot be
+    identified. Uses the counterexample's own (s, u) -- NOT a fixed probe
+    point -- so the check is non-circular.
     """
     from .identifiability import generate_counterexample
 
     n_abstained = 0
     n_total = 0
+    rng = np.random.default_rng(seed)
 
     for i in range(n_pairs):
-        ce = generate_counterexample(
-            s=25.0, u=25.0,
-            bounds=bounds,
-        )
-        if ce is not None:
-            n_total += 1
-            # The observation (s, u) from the counterexample
-            # should be UNRESOLVED
-            s = 25.0  # midpoint of range
-            u = 25.0
-            id_result = identify_direction(s, u, bounds)
-            if id_result.direction == "UNRESOLVED":
-                n_abstained += 1
+        s = float(rng.uniform(5.0, 50.0))
+        u = float(rng.uniform(5.0, 50.0))
+        ce = generate_counterexample(s=s, u=u, bounds=bounds)
+        if ce is None:
+            continue  # (s, u) falls outside the unresolved region; not a counterexample
+        n_total += 1
+        id_result = identify_direction(s, u, bounds)
+        # The counterexample PROVES opposite-sign models fit this snapshot,
+        # so the certificate must abstain.
+        if id_result.direction == "UNRESOLVED":
+            n_abstained += 1
 
     return {
         "n_pairs": n_total,

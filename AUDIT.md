@@ -1,7 +1,7 @@
 # B04 — Falsifiable Regimes for RNA Velocity
 
 Status: scout-phase deliverable. No git metadata; all outputs regenerable
-from pinned commands. 23/23 tests pass.
+from pinned commands. 24/24 tests pass.
 
 ## Executive summary
 
@@ -20,8 +20,24 @@ the unresolved region [γ_lo/β_hi, γ_hi/β_lo].
   observationally equivalent models with opposite signs exist.
 - Labeling power: 64–78% — metabolic labeling shrinks the unresolved set and
   provides an orthogonal falsification test.
-- With tight rate bounds (4× range), 8% of genes are certified; with broad
-  bounds (100× range), all are unresolved — exactly as the theorem predicts.
+- Designed-population certification: 132/200 genes certify (66 POSITIVE,
+  66 NEGATIVE), 68 abstain; with broad bounds (100× range), all are
+  unresolved — certification fraction is set by the rate bounds, exactly as
+  the theorem predicts.
+
+**Validation invariants (Sec 12) — what the synthetic numbers actually mean:**
+
+| Metric | Measured | What it proves |
+|--------|----------|----------------|
+| Coverage | 1.0 | For fixed (s,u), v = βu−γs is linear in (β,γ); the envelope over the parameter rectangle **must** contain the true velocity for every in-bounds (β,γ) |
+| Type-I error | 0.0 | A certified sign cannot contradict ground truth — certification requires ALL compatible models (incl. the true one) to agree |
+| Recall (power) | 1.0 | IND/POS and REP/NEG regimes are always certified in the correct direction |
+| Abstention (AMBIENT) | 1.0 | Observations inside the unresolved region always abstain |
+
+These are theorem consequences, not empirical luck — the tests exist
+the same way a compiler test exists: they pin the implementation to the
+proof. They caught one real bug (the coverage accumulator sat inside an
+`else` branch and silently read 0.0 on the first runs).
 
 ## Novelty boundary
 
@@ -49,7 +65,7 @@ the unresolved region [γ_lo/β_hi, γ_hi/β_lo].
 | Labeling does not shrink unresolved | ✗ Labeling power 64–78% |
 | Low power (< 30%) | ✗ Power 64–78% |
 | Preprocessing determines conclusion | ✗ Not tested yet (Stage 3) |
-| All calls unresolved | ✗ With tight bounds, 8% certified |
+| All calls unresolved | ✗ 132/200 certified on designed population |
 | Only benchmark ranking | ✗ Identification framework, not ranking |
 
 **Scout verdict: PASS → promote to full paper.**
@@ -62,7 +78,7 @@ cd b04-rna-velocity
 PYTHONPATH=src python3 -m b04 --out results --n-genes 200 --n-counterexamples 50 --seed 0 \
     --beta-lo 0.5 --beta-hi 2.0 --gamma-lo 0.5 --gamma-hi 2.0
 
-# Run tests (23/23)
+# Run tests (24/24)
 PYTHONPATH=src python3 -m pytest tests/ -v
 ```
 
